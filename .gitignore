@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Secrets
+.env
+
+# Local data
+data/raw_docs/
+data/chroma_db/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Tooling
+.qodo/
