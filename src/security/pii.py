@@ -23,6 +23,14 @@ _NLP_CONFIGURATION = {
     "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
 }
 
+# AnalyzerEngine defaults to score_threshold=0, which lets "very weak" (0.05)
+# pattern matches through unfiltered — e.g. US_SSN's bare-9-digits pattern,
+# meant to only fire alongside a context-word boost, otherwise flags any
+# 9-digit invoice/tracking/order number as a fake SSN. 0.4 keeps "medium"+
+# patterns (properly delimited SSNs, emails, phone numbers) while dropping
+# the standalone-digit-string guesses.
+DEFAULT_SCORE_THRESHOLD = 0.4
+
 
 @lru_cache(maxsize=1)
 def get_analyzer() -> AnalyzerEngine:
@@ -35,10 +43,16 @@ def get_anonymizer() -> AnonymizerEngine:
     return AnonymizerEngine()
 
 
-def mask_pii(text: str, entities: list[str] | None = None) -> str:
+def mask_pii(
+    text: str,
+    entities: list[str] | None = None,
+    score_threshold: float = DEFAULT_SCORE_THRESHOLD,
+) -> str:
     if not text:
         return text
     entities = list(entities) if entities is not None else DEFAULT_ENTITIES
-    results = get_analyzer().analyze(text=text, entities=entities, language="en")
+    results = get_analyzer().analyze(
+        text=text, entities=entities, language="en", score_threshold=score_threshold
+    )
     anonymized = get_anonymizer().anonymize(text=text, analyzer_results=results)
     return anonymized.text

@@ -42,6 +42,14 @@ def test_leaves_non_pii_text_unchanged():
     assert mask_pii(text) == text
 
 
+def test_bare_nine_digit_number_is_not_treated_as_ssn():
+    # US_SSN's "very weak" (0.05) bare-digits pattern is meant to only fire
+    # alongside a context-word confidence boost. Without score_threshold
+    # filtering, this would false-positive on any invoice/tracking number.
+    text = "Invoice number 483920175 is now overdue."
+    assert mask_pii(text) == text
+
+
 def test_empty_string_returns_empty_string():
     assert mask_pii("") == ""
 
