@@ -1,0 +1,77 @@
+# Local production-shaped stack: API + Celery worker + Redis + Prometheus + Grafana.
+# Ollama is expected to run on the host (host.docker.internal:11434) so the model
+# weights are not duplicated into a container.
+#
+#   docker compose -f docker/docker-compose.yml up --build
+#
+name: production-rag
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    ports: ["6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports: ["8000:8000"]
+    env_file: ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CHROMA_PATH: /app/data/chroma_db
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["chroma-data:/app/data/chroma_db", "raw-docs:/app/data/raw_docs"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "src.ingestion.tasks.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file: ../.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CHROMA_PATH: /app/data/chroma_db
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes: ["chroma-data:/app/data/chroma_db", "raw-docs:/app/data/raw_docs"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports: ["9090:9090"]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    depends_on: [api]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - "grafana-data:/var/lib/grafana"
+      - "./grafana/provisioning:/etc/grafana/provisioning:ro"
+    depends_on: [prometheus]
+
+volumes:
+  redis-data:
+  chroma-data:
+  raw-docs:
+  grafana-data:

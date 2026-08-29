@@ -1,0 +1,11 @@
+# Optional LLM tracing. NOT installed by default — it pulls a large tree
+# (strawberry-graphql, pydantic-ai, boto3, ...). Install only when you want
+# spans exported to Arize Phoenix:
+#
+#   uv pip install -r requirements-observability.txt
+#   export PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006   # or use the compose overlay
+#
+# src/observability/tracing.py imports these defensively; without them, span()
+# is a no-op and the pipeline is unchanged.
+arize-phoenix-otel>=0.6
+openinference-instrumentation>=0.1

@@ -17,3 +17,5 @@ data/chroma_db/
 
 # Tooling
 .qodo/
+.ruff_cache/
+scripts/_*.log

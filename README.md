@@ -76,6 +76,48 @@ Building this project meant working through the full width of what separates a R
 - **Operating a fully local LLM stack** — the practical differences between calling a hosted model API and running inference, embedding, and reranking models locally: latency characteristics, resource management, and the `lru_cache`-once-load pattern for expensive model objects.
 - **Production concerns beyond the model call itself** — async task processing with failure recovery (Celery `task_acks_late`), observability (metrics and tracing, not just logs), API security (auth, rate limiting), and versioning prompts as first-class, revertible artifacts alongside code.
 
+## Running It
+
+```bash
+# 0. prerequisites: Ollama serving llama3.2, Docker for Redis
+ollama serve &            # then: ollama pull llama3.2
+
+# 1. install
+uv venv && uv pip install -r requirements.txt
+uv run python -m spacy download en_core_web_sm
+cp .env.example .env      # set API_KEY
+
+# 2. run the API
+uv run uvicorn src.api.main:app --reload --port 8000     # http://localhost:8000/docs
+
+# 3. (optional) async ingestion worker + infra
+docker run -d -p 6379:6379 --name rag-redis redis:7-alpine
+uv run celery -A src.ingestion.tasks.celery_app worker --pool=solo
+
+# 4. full stack with metrics dashboards (Grafana :3000, Prometheus :9090)
+docker compose -f docker/docker-compose.yml up --build
+#    + LLM tracing (Phoenix :6006):
+make up-observability
+
+# 5. use it
+curl -s localhost:8000/health
+curl -s -XPOST localhost:8000/ingest -H "X-API-Key: $API_KEY" -F "file=@handbook.pdf"
+curl -s -XPOST localhost:8000/query  -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"question":"what is the leave policy?"}'
+```
+
+Endpoints: `GET /health` · `POST /ingest` (`?background=true` for async) ·
+`GET /tasks/{id}` · `POST /query` · `GET /metrics` · `GET /docs`.
+
+**Prove it works:** `make validate` runs lint + unit + integration + eval gate +
+a live API call and writes [`VALIDATION.md`](VALIDATION.md).
+Individually: `make test` · `make test-int` (needs Ollama) · `make evals` ·
+`make docker-build`.
+
+Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (topology, gaps, tool alternatives) ·
+[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) (every stage explained, with commands
+and proof steps).
+
 ## Project Structure
 
 ```
@@ -92,35 +134,41 @@ production-rag/
 │   │   ├── bm25.py                # BM25 in-memory index
 │   │   └── retriever.py           # RRF fusion + CrossEncoder rerank
 │   ├── generation/
-│   │   ├── llm.py                 # Ollama chat wrapper
-│   │   └── generator.py           # Full RAG pipeline
+│   │   ├── prompt.py              # Loads/renders versioned YAML prompt
+│   │   ├── llm.py                 # Ollama chat wrapper (raises LLMError)
+│   │   └── generator.py           # Full RAG pipeline + citation parsing + refusal
 │   ├── api/
-│   │   ├── main.py                # FastAPI app entry point
+│   │   ├── main.py                # FastAPI app: /health /ingest /query /tasks /metrics
 │   │   ├── models.py              # Pydantic request/response models
-│   │   ├── auth.py                # X-API-Key header verification
-│   │   └── cache.py               # Redis semantic cache
+│   │   ├── auth.py                # X-API-Key header verification (constant-time)
+│   │   └── cache.py               # Redis semantic cache (degrades gracefully)
 │   ├── security/
 │   │   └── pii.py                 # Presidio PII detection + masking
+│   ├── ingestion/
+│   │   ├── pipeline.py            # ingest_document(): parse→chunk→mask→embed→index
+│   │   └── tasks.py               # Celery async ingestion (task_acks_late)
 │   └── observability/
-│       └── metrics.py             # Prometheus counters/histograms
+│       ├── metrics.py             # Prometheus counters/histograms
+│       ├── logging.py             # JSON structured logging + request-id
+│       └── tracing.py             # Optional Arize Phoenix / OTel (no-op if absent)
 ├── tests/
-│   ├── unit/                      # Fast isolated tests (pytest)
-│   ├── integration/                # Full pipeline tests
+│   ├── unit/                      # Fast isolated tests (mocked I/O)
+│   ├── integration/               # Real models / Ollama (marker: integration)
 │   └── evals/
-│       ├── dataset.json           # Q&A pairs for RAGAS
-│       ├── fixtures/              # Sample documents the eval dataset is written against
-│       └── run_evals.py           # RAGAS evaluation runner
+│       ├── dataset.json           # 17 Q&A pairs (15 answerable + 2 refusal)
+│       ├── fixtures/acme_handbook.md
+│       └── run_evals.py           # Local-judge faithfulness + context-precision gate
 ├── docker/
-│   ├── docker-compose.yml         # Redis + Prometheus + Grafana
-│   └── prometheus.yml             # Scrape config
+│   ├── docker-compose.yml         # api + worker + Redis + Prometheus + Grafana
+│   ├── prometheus.yml
+│   └── grafana/provisioning/      # datasource + RAG overview dashboard
 ├── .github/workflows/
-│   └── eval_gate.yml              # CI quality gate (fails PR if eval drops)
-├── prompts/
-│   └── rag_v1.yaml                # Versioned prompt template
-├── data/
-│   ├── raw_docs/                  # Input documents (gitignored)
-│   └── chroma_db/                 # ChromaDB storage (gitignored)
-├── .env                           # Local secrets (never committed)
-├── .env.example                   # Template for teammates
+│   ├── ci.yml                     # lint + unit gate (every PR)
+│   └── eval_gate.yml              # quality gate (retrieval/prompt changes + weekly)
+├── prompts/rag_v1.yaml            # Versioned prompt template
+├── Dockerfile                     # Multi-stage, non-root, models baked in
+├── Makefile
+├── ARCHITECTURE.md
+├── .env / .env.example
 └── requirements.txt
 ```

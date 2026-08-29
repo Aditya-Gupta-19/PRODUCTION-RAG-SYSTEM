@@ -31,20 +31,29 @@ spacy>=3.7
 # --- observability ---
 prometheus-client>=0.20
 prometheus-fastapi-instrumentator>=7.0
-# arize-phoenix + openinference instrumentors added later (Stage 13, deferred)
+# arize-phoenix tracing is optional and imported defensively by
+# src/observability/tracing.py — install it only if you want LLM traces:
+#   uv pip install arize-phoenix arize-phoenix-otel openinference-instrumentation
 
 # --- queue ---
 celery[redis]>=5.4
 
 # --- evals ---
-ragas>=0.2
-datasets>=2.19
-langchain-ollama>=0.2
-langchain-community>=0.2
-langchain-huggingface>=0.1
+# NOTE: ragas 0.4.3 (latest) hard-imports langchain_community.chat_models.vertexai
+# and langchain_openai.chat_models.AzureChatOpenAI, which do not exist in the
+# langchain 1.x stack — `import ragas` fails. tests/evals/run_evals.py implements
+# the same faithfulness + context-precision gate with the local Ollama judge and
+# no langchain/ragas dependency. Re-enable the block below only with a pinned,
+# mutually-compatible langchain + ragas set.
+# ragas>=0.2
+# datasets>=2.19
+# langchain-ollama>=0.2
+# langchain-community>=0.2
+# langchain-huggingface>=0.1
 
 # --- testing ---
 pytest>=8.0
 pytest-asyncio>=0.23
 httpx>=0.27
-fpdf2>=2.7  # generates fixture PDFs for parser tests only, not used by app code
+fakeredis>=2.20     # in-process Redis for cache tests
+fpdf2>=2.7          # generates fixture PDFs for parser tests only, not used by app code
