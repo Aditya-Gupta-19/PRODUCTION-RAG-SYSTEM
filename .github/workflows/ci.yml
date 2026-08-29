@@ -47,3 +47,28 @@ jobs:
 
       - name: Run unit tests (integration excluded)
         run: uv run pytest -m "not integration" -q --durations=10
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: production-rag:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Container boots and /health is 200
+        run: |
+          docker run -d --name rag -p 8000:8000 -e API_KEY=ci-test-key production-rag:ci
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" localhost:8000/health || true)
+            [ "$code" = "200" ] && echo "healthy" && exit 0
+            sleep 5
+          done
+          docker logs rag; exit 1

@@ -17,3 +17,6 @@ data/chroma_db/
 
 # Tooling
 .qodo/
+.ruff_cache/
+scripts/_validate_run.log
+scripts/_smoke_server.log
