@@ -1,3 +1,6 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: end-to-end test that loads real models and hits the on-disk vector store (slow)",
+]
