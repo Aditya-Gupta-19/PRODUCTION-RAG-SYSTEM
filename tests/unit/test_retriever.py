@@ -9,8 +9,7 @@ class _FakeReranker:
 
     def predict(self, pairs):
         return [
-            float(sum(word in passage.lower() for word in query.lower().split()))
-            for query, passage in pairs
+            float(sum(word in passage.lower() for word in query.lower().split())) for query, passage in pairs
         ]
 
 
@@ -48,7 +47,10 @@ def test_rrf_k_controls_damping():
 
 _DOCS = {
     "c0": {"text": "Reciprocal rank fusion merges ranked lists.", "metadata": {"source": "d.txt", "page": 1}},
-    "c1": {"text": "The cross encoder reranks the fused candidates.", "metadata": {"source": "d.txt", "page": 1}},
+    "c1": {
+        "text": "The cross encoder reranks the fused candidates.",
+        "metadata": {"source": "d.txt", "page": 1},
+    },
     "c2": {"text": "Bananas are a good source of potassium.", "metadata": {"source": "d.txt", "page": 2}},
 }
 
@@ -57,9 +59,7 @@ _DOCS = {
 def stubbed(monkeypatch):
     monkeypatch.setattr(retriever, "embed_query", lambda q: [0.0])
     monkeypatch.setattr(retriever, "get_reranker", lambda: _FakeReranker())
-    monkeypatch.setattr(
-        retriever, "fetch_documents", lambda ids: {i: _DOCS[i] for i in ids if i in _DOCS}
-    )
+    monkeypatch.setattr(retriever, "fetch_documents", lambda ids: {i: _DOCS[i] for i in ids if i in _DOCS})
 
 
 def _vector(*ids):

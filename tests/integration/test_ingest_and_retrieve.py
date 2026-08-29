@@ -81,8 +81,7 @@ def test_pii_is_masked_before_it_reaches_the_store(tmp_path):
     # a real one (.com) — an RFC-2606 reserved TLD like .example is silently
     # not recognised as an email, the same way 123-45-6789 is a denylisted SSN.
     body = (
-        "For escalations contact Sarah Whitfield at sarah.whitfield@acme.com "
-        "or call 415-555-0142.\n" + SAMPLE
+        "For escalations contact Sarah Whitfield at sarah.whitfield@acme.com or call 415-555-0142.\n" + SAMPLE
     )
     ingest_document(_write(tmp_path, "contacts.txt", body), chunk_size=40, overlap=10)
 

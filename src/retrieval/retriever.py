@@ -26,10 +26,10 @@ class RetrievedChunk:
     id: str
     text: str
     metadata: dict
-    score: float             # reranker relevance score, or RRF score if rerank is off
+    score: float  # reranker relevance score, or RRF score if rerank is off
     rrf_score: float
     vector_rank: int | None  # 1-indexed rank in vector search; None if it did not return this chunk
-    bm25_rank: int | None    # 1-indexed rank in BM25 search; None if it did not return this chunk
+    bm25_rank: int | None  # 1-indexed rank in BM25 search; None if it did not return this chunk
 
 
 def reciprocal_rank_fusion(ranked_lists: list[list[str]], k: int = RRF_K) -> dict[str, float]:
@@ -83,9 +83,7 @@ def retrieve(
 
     # Text + metadata for every fused candidate. Vector hits already carry
     # their text; a chunk that only BM25 ranked must be fetched from the store.
-    pool: dict[str, dict] = {
-        h["id"]: {"text": h["text"], "metadata": h["metadata"]} for h in vector_hits
-    }
+    pool: dict[str, dict] = {h["id"]: {"text": h["text"], "metadata": h["metadata"]} for h in vector_hits}
     pool.update(fetch_documents([doc_id for doc_id in fused if doc_id not in pool]))
 
     candidates = sorted(
@@ -96,7 +94,7 @@ def retrieve(
 
     if rerank and len(candidates) > 1:
         scores = get_reranker().predict([(query, pool[doc_id]["text"]) for doc_id in candidates])
-        ranked = sorted(zip(candidates, scores), key=lambda pair: pair[1], reverse=True)
+        ranked = sorted(zip(candidates, scores, strict=True), key=lambda pair: pair[1], reverse=True)
         final = [(doc_id, float(score)) for doc_id, score in ranked[:rerank_top_n]]
     else:
         final = [(doc_id, fused[doc_id]) for doc_id in candidates[:rerank_top_n]]
