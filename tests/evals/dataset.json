@@ -1,0 +1,107 @@
+{
+  "fixture": "acme_handbook.md",
+  "items": [
+    {
+      "question": "How many paid annual leave days do full-time employees get per year?",
+      "reference": "Full-time employees accrue 25 days of paid annual leave per calendar year.",
+      "answerable": true,
+      "must_include": ["25"]
+    },
+    {
+      "question": "How much annual leave can be carried over to the next year?",
+      "reference": "Up to 5 days of unused annual leave may be carried into the following year; anything above 5 days is forfeited on 31 December.",
+      "answerable": true,
+      "must_include": ["5"]
+    },
+    {
+      "question": "When is a doctor's note required for sick leave?",
+      "reference": "A doctor's note is required only for a sick absence longer than two consecutive working days.",
+      "answerable": true,
+      "must_include": ["two", "2"]
+    },
+    {
+      "question": "How many paid sick days are employees entitled to each year?",
+      "reference": "Employees are entitled to 10 paid sick days per year.",
+      "answerable": true,
+      "must_include": ["10"]
+    },
+    {
+      "question": "How many days a week can I work remotely without director approval?",
+      "reference": "Employees may work remotely up to three days per week; four or more days requires written director approval.",
+      "answerable": true,
+      "must_include": ["three", "3"]
+    },
+    {
+      "question": "Does ACME reimburse home internet costs for remote workers?",
+      "reference": "No. The company does not reimburse home internet or electricity costs, but provides a one-time 300 dollar home-office equipment stipend.",
+      "answerable": true,
+      "must_include": ["not", "300"]
+    },
+    {
+      "question": "What is the deadline for submitting an expense claim?",
+      "reference": "Expense claims must be submitted within 60 days of the expense being incurred.",
+      "answerable": true,
+      "must_include": ["60"]
+    },
+    {
+      "question": "What expense amount requires director sign-off before it is incurred?",
+      "reference": "Any single expense above 500 dollars requires director sign-off before the expense is incurred.",
+      "answerable": true,
+      "must_include": ["500"]
+    },
+    {
+      "question": "What is the international daily meal allowance when travelling?",
+      "reference": "The daily meal allowance while travelling is 90 dollars international.",
+      "answerable": true,
+      "must_include": ["90"]
+    },
+    {
+      "question": "How often are company laptops refreshed?",
+      "reference": "Laptops are refreshed every three years.",
+      "answerable": true,
+      "must_include": ["three", "3"]
+    },
+    {
+      "question": "How quickly must lost or stolen equipment be reported?",
+      "reference": "Lost or stolen equipment must be reported to IT Security within 24 hours.",
+      "answerable": true,
+      "must_include": ["24"]
+    },
+    {
+      "question": "What is the minimum password length on company laptops?",
+      "reference": "Passwords must be at least 14 characters.",
+      "answerable": true,
+      "must_include": ["14"]
+    },
+    {
+      "question": "How long is the probation period for new employees?",
+      "reference": "New employees serve a probation period of six months.",
+      "answerable": true,
+      "must_include": ["six", "6"]
+    },
+    {
+      "question": "What is the notice period for a manager after probation?",
+      "reference": "After probation the notice period is three months for managers.",
+      "answerable": true,
+      "must_include": ["three", "3"]
+    },
+    {
+      "question": "In which months are performance reviews held?",
+      "reference": "Performance reviews are held twice per year, in June and December.",
+      "answerable": true,
+      "must_include": ["June", "December"]
+    },
+    {
+      "question": "What is the company's policy on cryptocurrency trading by employees?",
+      "reference": "The handbook does not contain this information.",
+      "answerable": false,
+      "must_include": []
+    },
+    {
+      "question": "What health insurance provider does ACME use?",
+      "reference": "The handbook does not contain this information.",
+      "answerable": false,
+      "must_include": []
+    }
+  ]
+}
