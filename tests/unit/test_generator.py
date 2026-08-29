@@ -82,6 +82,11 @@ def test_out_of_range_citation_markers_are_dropped(three_chunks, monkeypatch):
     )
     result = answer("q")
     assert [c.marker for c in result.citations] == [1]
+    # the invalid markers must also be scrubbed from the answer text
+    assert "[7]" not in result.answer
+    assert "[0]" not in result.answer
+    assert "[1]" in result.answer
+    assert "Fact B ." not in result.answer  # no dangling space before the period
 
 
 def test_llm_error_returns_degraded_answer(three_chunks, monkeypatch):

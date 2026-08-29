@@ -1,12 +1,11 @@
 import logging
-import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, File, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -66,12 +65,22 @@ app.add_middleware(
 )
 
 
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
+async def request_id_and_headers_middleware(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
     started = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
     logger.info(
         "request",
         extra={
@@ -88,23 +97,35 @@ async def request_id_middleware(request: Request, call_next):
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
+# `localhost` on Windows resolves IPv6 (::1) first and stalls ~2 s before falling
+# back to IPv4, which made /health slow. Hit the loopback IP directly for the
+# liveness probe.
+_OLLAMA_HEALTH_URL = settings.ollama_base_url.replace("//localhost", "//127.0.0.1") + "/api/tags"
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     checks: dict[str, str] = {}
 
+    # Health is unauthenticated, so report only a status word per check — the
+    # exception detail (which can contain filesystem paths or internal URLs)
+    # goes to the logs, not the response body. Every check is time-bounded so the
+    # endpoint always answers quickly for a load balancer / k8s probe.
     try:
         get_collection().count()
         checks["vector_store"] = "ok"
-    except Exception as exc:
-        checks["vector_store"] = f"error: {exc}"
+    except Exception:
+        logger.exception("health: vector_store check failed")
+        checks["vector_store"] = "error"
 
     checks["cache"] = "ok" if get_redis() is not None else "unavailable"
 
     try:
-        httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=2.0).raise_for_status()
+        httpx.get(_OLLAMA_HEALTH_URL, timeout=1.5).raise_for_status()
         checks["llm"] = "ok"
-    except Exception as exc:
-        checks["llm"] = f"error: {exc}"
+    except Exception:
+        logger.warning("health: llm check failed", exc_info=True)
+        checks["llm"] = "error"
 
     status = "ok" if checks.get("vector_store") == "ok" and checks.get("llm") == "ok" else "degraded"
     return HealthResponse(status=status, checks=checks)
@@ -150,16 +171,30 @@ def query(request: Request, body: QueryRequest) -> QueryResponse:
 @app.post("/ingest", response_model=IngestResponse, dependencies=[Depends(require_api_key)])
 @limiter.limit(lambda: f"{settings.rate_limit_per_minute}/minute")
 def ingest(request: Request, file: UploadFile = File(...), background: bool = False) -> IngestResponse:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=415, detail=f"Unsupported file type {suffix!r}; allowed: .pdf .txt")
+    # Path(...).name strips any directory component, so "../../etc/passwd" can
+    # only ever land as "passwd" inside RAW_DOCS_DIR.
+    safe_name = Path(file.filename or "").name
+    suffix = Path(safe_name).suffix.lower()
+    if not safe_name or suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type {suffix!r}; allowed: {sorted(ALLOWED_SUFFIXES)}",
+        )
 
     RAW_DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = RAW_DOCS_DIR / Path(file.filename).name
+    dest = RAW_DOCS_DIR / safe_name
+    written = 0
     with dest.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+        while chunk := file.file.read(1024 * 1024):
+            written += len(chunk)
+            if written > settings.max_upload_bytes:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload exceeds {settings.max_upload_bytes} bytes",
+                )
+            out.write(chunk)
 
     if background:
         from src.ingestion.tasks import ingest_document_task

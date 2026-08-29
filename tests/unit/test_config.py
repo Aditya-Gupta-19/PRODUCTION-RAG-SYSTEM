@@ -20,6 +20,7 @@ def test_env_vars_map_to_expected_fields(monkeypatch):
     monkeypatch.setenv("CACHE_SIMILARITY_THRESHOLD", "0.85")
     monkeypatch.setenv("API_KEY", "test-key")
     monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "50")
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "1048576")
     monkeypatch.setenv("FAITHFULNESS_THRESHOLD", "0.75")
     monkeypatch.setenv("CONTEXT_PRECISION_THRESHOLD", "0.6")
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
@@ -44,6 +45,7 @@ def test_env_vars_map_to_expected_fields(monkeypatch):
     assert settings.cache_similarity_threshold == 0.85
     assert settings.api_key == "test-key"
     assert settings.rate_limit_per_minute == 50
+    assert settings.max_upload_bytes == 1048576
     assert settings.faithfulness_threshold == 0.75
     assert settings.context_precision_threshold == 0.6
     assert settings.log_level == "DEBUG"
@@ -72,6 +74,7 @@ def test_defaults_match_spec(monkeypatch):
     assert settings.cache_similarity_threshold == 0.92
     assert settings.rate_limit_per_minute == 100
     assert settings.cors_allowed_origins == "http://localhost:3000"
+    assert settings.max_upload_bytes == 20 * 1024 * 1024
     assert settings.faithfulness_threshold == 0.70
     assert settings.context_precision_threshold == 0.65
     assert settings.log_level == "INFO"

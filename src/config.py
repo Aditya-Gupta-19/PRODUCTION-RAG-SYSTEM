@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     api_key: str
     rate_limit_per_minute: int = 100
     cors_allowed_origins: str = "http://localhost:3000"  # comma-separated
+    max_upload_bytes: int = 20 * 1024 * 1024  # reject /ingest uploads larger than this
 
     # Ingestion
     chunk_size: int = 500

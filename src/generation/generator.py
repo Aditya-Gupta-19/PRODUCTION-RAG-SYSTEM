@@ -52,6 +52,15 @@ def _cited_markers(answer: str, passage_count: int) -> list[int]:
     return sorted(m for m in seen if 1 <= m <= passage_count)
 
 
+def _strip_invalid_markers(answer: str, valid: set[int]) -> str:
+    """Drop ``[n]`` markers the model emitted that don't map to a shown passage,
+    so the answer text and the citations list never disagree."""
+    cleaned = _MARKER_RE.sub(lambda m: m.group(0) if int(m.group(1)) in valid else "", answer)
+    # tidy artefacts left by a removed marker: " ." -> "." and doubled spaces
+    cleaned = re.sub(r"\s+([.,;:)])", r"\1", cleaned)
+    return re.sub(r"  +", " ", cleaned).strip()
+
+
 def answer(
     question: str,
     *,
@@ -108,6 +117,7 @@ def answer(
     if _looks_like_refusal(raw):
         return RagAnswer(question, REFUSAL, [], contexts, prompt.version, refused=True)
 
+    markers = _cited_markers(raw, len(chunks))
     citations = [
         Citation(
             marker=marker,
@@ -115,6 +125,6 @@ def answer(
             page=chunks[marker - 1].metadata.get("page"),
             chunk_id=chunks[marker - 1].id,
         )
-        for marker in _cited_markers(raw, len(chunks))
+        for marker in markers
     ]
-    return RagAnswer(question, raw, citations, contexts, prompt.version)
+    return RagAnswer(question, _strip_invalid_markers(raw, set(markers)), citations, contexts, prompt.version)
