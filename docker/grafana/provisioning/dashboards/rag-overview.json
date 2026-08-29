@@ -1,0 +1,63 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "title": "RAG — Overview",
+  "uid": "rag-overview",
+  "tags": ["rag"],
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Query rate by outcome (req/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum by (outcome) (rate(rag_queries_total[5m]))", "legendFormat": "{{outcome}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Query latency p50 / p95 / p99 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(rag_query_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_query_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(rag_query_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retrieval vs generation p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_retrieval_latency_seconds_bucket[5m])) by (le))", "legendFormat": "retrieval p95" },
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_generation_latency_seconds_bucket[5m])) by (le))", "legendFormat": "generation p95" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit ratio (15m)",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        { "expr": "sum(rate(rag_cache_lookups_total{result=\"hit\"}[15m])) / clamp_min(sum(rate(rag_cache_lookups_total[15m])), 0.001)" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Chunks indexed (total)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "targets": [ { "expr": "rag_ingest_chunks_total" } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP requests by status (req/s)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "sum by (status) (rate(http_requests_total[5m]))", "legendFormat": "{{status}}" }
+      ]
+    }
+  ]
+}
