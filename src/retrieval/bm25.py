@@ -17,7 +17,7 @@ class BM25Index:
         if self._bm25 is None:
             return []
         scores = self._bm25.get_scores(query.lower().split())
-        ranked = sorted(zip(self._ids, scores), key=lambda pair: pair[1], reverse=True)
+        ranked = sorted(zip(self._ids, scores, strict=True), key=lambda pair: pair[1], reverse=True)
         # rank_bm25 returns numpy.float64 — cast to plain float so scores stay
         # JSON-serializable once they flow into API responses later.
         return [(doc_id, float(score)) for doc_id, score in ranked[:top_k] if score > 0]

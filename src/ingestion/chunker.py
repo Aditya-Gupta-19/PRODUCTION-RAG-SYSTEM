@@ -14,8 +14,7 @@ def chunk_text(pages: list[dict], chunk_size: int = 500, overlap: int = 100) -> 
 
     step = chunk_size - overlap
     chunks = []
-    chunk_index = 0
-    for i in range(0, len(words), step):
+    for chunk_index, i in enumerate(range(0, len(words), step)):
         window = words[i : i + chunk_size]
         if not window:
             break
@@ -30,7 +29,6 @@ def chunk_text(pages: list[dict], chunk_size: int = 500, overlap: int = 100) -> 
                 "chunk_index": chunk_index,
             }
         )
-        chunk_index += 1
         if i + chunk_size >= len(words):
             break
     return chunks

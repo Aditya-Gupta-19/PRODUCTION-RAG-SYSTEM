@@ -51,7 +51,7 @@ def vector_search(query_embedding: list[float], top_k: int | None = None) -> lis
     distances = result["distances"][0]
     return [
         {"id": doc_id, "text": doc, "metadata": meta, "distance": dist}
-        for doc_id, doc, meta, dist in zip(ids, docs, metadatas, distances)
+        for doc_id, doc, meta, dist in zip(ids, docs, metadatas, distances, strict=True)
     ]
 
 
@@ -67,5 +67,5 @@ def fetch_documents(ids: list[str]) -> dict[str, dict]:
     result = get_collection().get(ids=ids)
     return {
         doc_id: {"text": doc, "metadata": meta}
-        for doc_id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"])
+        for doc_id, doc, meta in zip(result["ids"], result["documents"], result["metadatas"], strict=True)
     }

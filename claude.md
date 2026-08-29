@@ -263,21 +263,33 @@ Fix:   BM25 index must be built AFTER documents are ingested.
 ---
 
 Phases Completed
+
+> Status reflects git history, not aspiration. Commits are labelled `Stage N`.
+> Stage 0-3 = scaffold/config, parse+chunk, PII, retrieval primitives.
+> Stage 4 = ingestion pipeline + hybrid retriever (RRF + CrossEncoder).
+> Stage 5-9 = generation, API, async+Docker, CI+evals, observability+docs.
+
 [x] Phase 1: Environment Setup
 [x] Phase 2: Configuration (Pydantic Settings)
-[x] Phase 3: Ingestion (Parser + Chunker)
-[x] Phase 4: Embeddings + ChromaDB
+[x] Phase 3: Ingestion (Parser + Chunker; now also .md)
+[x] Phase 4: Embeddings + ChromaDB (client cached, upsert)
 [x] Phase 5: BM25 Keyword Search
-[x] Phase 6: Hybrid Retrieval + RRF
-[x] Phase 7: CrossEncoder Reranking
-[x] Phase 8: LLM Generation + Versioned Prompts
+[x] Phase 6: Hybrid Retrieval + RRF            → src/retrieval/retriever.py
+[x] Phase 7: CrossEncoder Reranking            → src/retrieval/retriever.py
+[x] Phase 8: LLM Generation + Versioned Prompts → prompts/rag_v1.yaml, src/generation/*
 [x] Phase 9: Security — PII Masking (Presidio)
-[x] Phase 10: FastAPI + Auth + Rate Limiting
-[x] Phase 11: Semantic Cache (Redis)
-[x] Phase 12: Observability (Phoenix + Prometheus + Grafana)
-[x] Phase 13: Async Ingestion (Celery)
-[x] Phase 14: RAGAS Evals + GitHub Actions CI Gate
-[x] Phase 15: Unit Tests
+[x] Phase 10: FastAPI + Auth + Rate Limiting   → src/api/*
+[x] Phase 11: Semantic Cache (Redis)           → src/api/cache.py (degrades gracefully)
+[~] Phase 12: Observability — Prometheus + Grafana + JSON logs done;
+              Arize Phoenix wired as optional/no-op (src/observability/tracing.py)
+[x] Phase 13: Async Ingestion (Celery)         → src/ingestion/tasks.py
+[~] Phase 14: Eval gate — local Llama judge (faithfulness + context precision) +
+              GitHub Actions. RAGAS itself is disabled: v0.4.3 is incompatible
+              with the installed langchain 1.x stack. See ARCHITECTURE.md §7.
+[x] Phase 15: Tests — 89 unit + 7 integration (marked, Ollama-gated)
+
+See ARCHITECTURE.md for the full component map, runtime topology, what is still
+left, alternative tools, and the production-methodology self-review.
 
 ---
 
