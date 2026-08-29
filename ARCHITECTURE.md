@@ -113,19 +113,28 @@ passages, with source + page citations.
 
 ## 5. What is still left / not done
 
-| Area | Gap | Impact | Planned fix |
+Kept deliberately (not defects — the constraints are $0, local, single-node):
+
+| Area | Gap | Impact | Note |
 |---|---|---|---|
-| Vector store concurrency | `api` + `worker` share one on-disk Chroma (sqlite). Concurrent writers can lock/corrupt. | Medium — fine for demo, not for real multi-writer load | Run Chroma in server mode (`chromadb run`) + `HttpClient`; the `vectorstore.py` surface is 4 functions, so the swap is contained |
-| Evals | RAGAS replaced by a local-judge harness (dependency conflict, see §7). Judge is Llama 3.2 — noisier than GPT-4-class judges. | Low — gate still catches large regressions | Pin a compatible `langchain`+`ragas` set in a separate venv, or use a bigger judge model |
-| Tracing | Phoenix wired as optional/no-op; not exercised in compose | Low — metrics + structured logs cover most needs | Add a `phoenix` service to compose + `PHOENIX_COLLECTOR_ENDPOINT` |
-| Frontend | No React UI (spec Phase 10 item) | Cosmetic — `/docs` is usable | Build `codesentinel-ui`-style dashboard against the existing API |
-| Deploy target | compose only; no Kubernetes manifests / Helm | Medium for scale-out | k8s Deployment + HPA on `rag_query_latency` / queue depth |
-| Auth | Single shared API key | OK for internal tool | Per-tenant keys + scopes, or OIDC at a gateway |
-| Docker | Not build-verified this session (Docker Desktop was down) | Low — Dockerfile is standard multi-stage | `docker build` + compose smoke test in CI |
-| Cache eviction | `lookup` does a full `SCAN` per query — O(n) in cached questions | Low at TTL-bounded scale | RediSearch vector index, or an LRU cap |
-| Reranker score | Uncalibrated logit surfaced as `score` | Cosmetic | Sigmoid at the API boundary if a 0–1 confidence is needed |
-| PDF coverage | No OCR; scanned PDFs yield empty text | Medium depending on corpus | `unstructured` / `pytesseract` fallback when `extract_text()` is empty |
-| PII entities | No URL / `DOMAIN_NAME` recognizer | Low | Add a Presidio pattern recognizer for URLs |
+| Vector store concurrency | `api` + `worker` share one on-disk Chroma (sqlite). Concurrent writers can lock. | Medium at real multi-writer load | **Keeping Chroma** (per project decision). If it ever matters: `chromadb run` server mode + `HttpClient` — `vectorstore.py` is 4 functions, the swap is contained. |
+| Evals | RAGAS replaced by a local-judge harness (dependency conflict, §7). Judge is Llama 3.2 — noisier than a frontier judge. | Low — gate still catches large regressions (0.80 / 0.73 last run) | Pin a compatible `langchain`+`ragas` set in a separate venv if standard metric names are wanted. |
+| Frontend | No web UI | Cosmetic — `/docs` (Swagger) is usable | Any SPA can consume the typed OpenAPI schema. |
+| Deploy target | compose only; no Kubernetes / Helm | Medium for scale-out | k8s Deployment + HPA on `rag_query_latency` / queue depth. |
+| Auth | Single shared API key | OK for an internal tool | Per-tenant keys + scopes, or OIDC/JWT at a gateway. |
+| Cache eviction | `lookup` does a full `SCAN` per query — O(n) in cached questions | Low at TTL-bounded scale | RediSearch vector index at large scale. |
+| PDF coverage | No OCR; scanned PDFs yield empty text | Corpus-dependent | `unstructured` / `pytesseract` fallback when `extract_text()` is empty. |
+| PII entities | No URL / `DOMAIN_NAME` recognizer | Low | Add a Presidio pattern recognizer for URLs. |
+
+Done in Stages 10–14 (previously "left"):
+
+| Area | Status |
+|---|---|
+| Docker | **Build-verified** — `production-rag:local` (3.13 GB), non-root, boots healthy, containerised `/query` returns grounded cited answers. CI `docker` job added. |
+| Full compose stack | **Verified** — api + worker + redis + prometheus + grafana up; cache hit/miss, async Celery task SUCCESS, Prometheus target `up`, Grafana healthy. |
+| Tracing | Real `arize-phoenix-otel` integration behind `requirements-observability.txt` + `docker/docker-compose.observability.yml` overlay (`make up-observability`). Base image stays lean. |
+| Security | Security headers, 20 MB upload cap (413), path-traversal neutralised, `/health` info-leak fixed, non-ASCII-key → 401. `/security-review` run — no HIGH/MEDIUM findings. |
+| Reproducible proof | `scripts/validate.py` (`make validate`) → `VALIDATION.md`. |
 
 ---
 
@@ -143,7 +152,12 @@ passages, with source + page citations.
 | Celery + Redis | RQ, Dramatiq, Arq, cloud queues (SQS/PubSub) | Simpler needs, or managed infra preference |
 | Redis semantic cache | GPTCache, semantic-router, no cache | Need cross-node cache semantics or richer policies |
 | prometheus-client | OpenTelemetry metrics + OTLP | Standardising on OTel end-to-end |
-| compose | Kubernetes + Helm/Kustomize, Nomad | Multi-node, autoscaling, rolling deploys |
+| Arize Phoenix (tracing) | Langfuse, LangSmith, Jaeger/Tempo + manual OTel | Want prompt management / datasets alongside traces |
+| compose | Kubernetes + Helm/Kustomize, Nomad, ECS | Multi-node, autoscaling, rolling deploys |
+| single shared API key | per-tenant keys + scopes, OIDC/JWT at a gateway | More than one consumer, or per-consumer quotas/audit |
+
+Full reasoning for each row is in [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md).
+**We are not switching any of these** — the table is for when the constraints change.
 
 ---
 
@@ -160,27 +174,33 @@ passages, with source + page citations.
 - **Idempotency** — deterministic chunk ids + upsert; re-ingest is safe.
 - **Privacy by construction** — PII masked *before* the irreversible step
   (embed/store), verified end-to-end by an integration test.
-- **Testing pyramid** — 60+ fast unit tests (mocked I/O) form the base; a small
-  `integration`-marked layer exercises real models/Ollama and is skipped when the
-  host isn't available; an eval gate guards answer quality separately.
-- **Version control discipline** — one branch + one focused commit per stage;
-  prompts versioned as data; `.gitattributes` normalises line endings.
-- **Observability** — RED metrics (Rate, Errors, Duration) as counters +
-  histograms; JSON logs with request-id correlation; provisioned Grafana board.
-- **CI/CD** — lint + type-of-contract tests on every PR; heavier eval gate scoped
-  to the paths that can regress quality; Docker image is multi-stage, non-root,
-  pinned base, healthchecked.
-- **Supply chain** — dependencies pinned by floor + a lockable venv (uv); model
-  weights baked into the image for reproducible, offline-capable startup.
+- **Testing pyramid** — ~97 fast unit tests (mocked I/O) form the base; 7
+  `integration`-marked tests exercise real models/Ollama and skip when the host
+  is absent; a separate eval gate guards answer quality.
+- **Version control discipline** — one focused commit per stage; prompts
+  versioned as data; `.gitattributes` normalises line endings.
+- **Observability** — RED metrics as counters + histograms; JSON logs with
+  request-id correlation; provisioned Grafana board; optional Phoenix tracing.
+- **CI/CD** — lint + unit gate + image-build-and-boot on every PR; heavier eval
+  gate scoped to quality-affecting paths; multi-stage non-root pinned image.
+- **Security** — constant-time key check, security headers, upload cap,
+  path-traversal neutralised, unauthenticated-endpoint info-leak fixed;
+  `/security-review` run clean.
+- **Supply chain** — deps pinned by floor + a lockable uv venv; model weights
+  baked into the image for reproducible, offline-capable startup.
+- **Reproducible proof** — `make validate` runs everything and writes
+  `VALIDATION.md`.
 
-**Not yet at production bar (tracked in §5):**
-- Single-writer vector store under a multi-process compose.
+**Not yet at production bar (tracked in §5, all deliberate for a $0 single-node
+system):**
+- Single-writer vector store under a multi-process compose (Chroma is kept by
+  project decision; server mode is the escape hatch).
 - No k8s / autoscaling / blue-green.
 - Eval judge is a small local model (weaker than a frontier judge).
-- Docker image not build-verified in this environment.
-- Single shared API key; no request quotas beyond rate limiting.
+- Single shared API key.
 
-**Verdict:** the *shape* is production-grade — the seams, the failure behaviour,
-the tests, the observability and the release pipeline are all in place and
-correct. The remaining items are scale-out concerns (stateful store, orchestration)
-and one dependency pin (RAGAS), all explicitly tracked rather than hidden.
+**Verdict:** the system is production-*shaped* and now production-*verified* at
+single-node scale — it builds, boots as non-root, answers grounded-and-cited,
+degrades safely on every dependency failure, passes its own quality gate, and the
+whole thing is reproducible with one command. The open items are genuine
+scale-out concerns and one dependency pin, all tracked rather than hidden.

@@ -94,8 +94,10 @@ uv run uvicorn src.api.main:app --reload --port 8000     # http://localhost:8000
 docker run -d -p 6379:6379 --name rag-redis redis:7-alpine
 uv run celery -A src.ingestion.tasks.celery_app worker --pool=solo
 
-# 4. (optional) full stack with metrics dashboards
+# 4. full stack with metrics dashboards (Grafana :3000, Prometheus :9090)
 docker compose -f docker/docker-compose.yml up --build
+#    + LLM tracing (Phoenix :6006):
+make up-observability
 
 # 5. use it
 curl -s localhost:8000/health
@@ -107,9 +109,14 @@ curl -s -XPOST localhost:8000/query  -H "X-API-Key: $API_KEY" \
 Endpoints: `GET /health` · `POST /ingest` (`?background=true` for async) ·
 `GET /tasks/{id}` · `POST /query` · `GET /metrics` · `GET /docs`.
 
-Tests: `make test` (unit) · `make test-int` (integration, needs Ollama) ·
-`make evals` (quality gate). Full architecture, gaps and tool alternatives:
-[ARCHITECTURE.md](ARCHITECTURE.md).
+**Prove it works:** `make validate` runs lint + unit + integration + eval gate +
+a live API call and writes [`VALIDATION.md`](VALIDATION.md).
+Individually: `make test` · `make test-int` (needs Ollama) · `make evals` ·
+`make docker-build`.
+
+Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (topology, gaps, tool alternatives) ·
+[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) (every stage explained, with commands
+and proof steps).
 
 ## Project Structure
 
