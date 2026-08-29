@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from src.config import settings
 from src.ingestion.chunker import chunk_text
 from src.ingestion.parser import parse_document
 from src.retrieval.bm25 import rebuild_bm25_from_vectorstore
@@ -20,8 +21,8 @@ class IngestResult:
 def ingest_document(
     file_path: str | Path,
     *,
-    chunk_size: int = 500,
-    overlap: int = 100,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
     mask: bool = True,
 ) -> IngestResult:
     """Parse → chunk → mask PII → embed → upsert to the vector store → rebuild BM25.
@@ -34,6 +35,9 @@ def ingest_document(
     Re-ingesting the same file is idempotent — chunk ids are deterministic and
     the store upserts — so this is safe to call again after a document changes.
     """
+    chunk_size = settings.chunk_size if chunk_size is None else chunk_size
+    overlap = settings.chunk_overlap if overlap is None else overlap
+
     path = Path(file_path)
     pages = parse_document(path)
     chunks = chunk_text(pages, chunk_size=chunk_size, overlap=overlap)
