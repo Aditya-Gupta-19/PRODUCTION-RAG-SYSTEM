@@ -40,6 +40,13 @@ def test_parse_document_dispatches_by_suffix(tmp_path):
     assert parse_document(txt_path) == parse_txt(txt_path)
 
 
+def test_parse_document_treats_markdown_as_text(tmp_path):
+    md_path = tmp_path / "notes.md"
+    md_path.write_text("# Heading\n\nBody text.", encoding="utf-8")
+    pages = parse_document(md_path)
+    assert pages == [{"page": 1, "text": "# Heading\n\nBody text.", "source": "notes.md"}]
+
+
 def test_parse_document_rejects_unsupported_type(tmp_path):
     bad_path = tmp_path / "a.docx"
     bad_path.write_text("hi", encoding="utf-8")

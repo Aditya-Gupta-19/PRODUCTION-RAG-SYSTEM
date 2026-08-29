@@ -1,6 +1,27 @@
+[project]
+name = "production-rag"
+version = "1.0.0"
+description = "Local, $0-per-call production RAG system: hybrid retrieval, PII-safe ingestion, evals gate."
+requires-python = ">=3.12"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
-    "integration: end-to-end test that loads real models and hits the on-disk vector store (slow)",
+    "integration: end-to-end test that loads real models / hits the on-disk vector store / needs Ollama (slow)",
 ]
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = ["B008"]  # FastAPI Depends()/File() in argument defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
