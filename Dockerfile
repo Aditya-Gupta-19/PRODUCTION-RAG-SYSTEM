@@ -10,12 +10,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN pip install --no-cache-dir uv
 
 WORKDIR /app
-COPY requirements.txt .
+COPY requirements.txt requirements-observability.txt ./
 
 # CPU-only torch keeps the image ~2 GB smaller than the default CUDA build.
 RUN uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu \
  && uv pip install --system -r requirements.txt \
  && python -m spacy download en_core_web_sm
+
+# Optional: install the Phoenix/OTel tracing tree. Off by default (large).
+# Enabled by the docker-compose.observability.yml overlay.
+ARG INSTALL_OBSERVABILITY=0
+RUN if [ "$INSTALL_OBSERVABILITY" = "1" ]; then \
+      uv pip install --system -r requirements-observability.txt ; \
+    fi
 
 # Pre-download the embedding + reranker weights so the container starts
 # deterministically and works offline. Cached under /models.

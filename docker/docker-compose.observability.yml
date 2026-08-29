@@ -1,0 +1,42 @@
+# Overlay that adds Arize Phoenix LLM tracing to the base stack.
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.observability.yml up --build
+#
+# Phoenix UI: http://localhost:6006 — traces for every /query (retrieve + generate spans).
+# The app image must have requirements-observability.txt installed for spans to
+# export; the base image does not, so this overlay rebuilds it with a build arg.
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-11.50.0
+    ports:
+      - "6006:6006"   # UI + OTLP/HTTP collector
+    environment:
+      PHOENIX_WORKING_DIR: /data
+    volumes:
+      - phoenix-data:/data
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_OBSERVABILITY: "1"
+    environment:
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+    depends_on:
+      - phoenix
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        INSTALL_OBSERVABILITY: "1"
+    environment:
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+    depends_on:
+      - phoenix
+
+volumes:
+  phoenix-data:
