@@ -38,9 +38,73 @@ Question
 
 A semantic cache sits in front of the LLM call: if a sufficiently similar question has been answered recently, the cached answer is returned instead of re-running generation.
 
+## Architecture
+
+### Component map
+
+| Layer | Module | Tool | Why this tool |
+|---|---|---|---|
+| Config | `src/config.py` | pydantic-settings | Typed config, one source of truth, env / `.env` override |
+| Parse | `src/ingestion/parser.py` | `pypdf` | Pure-Python, no native deps; digital PDFs (no OCR) |
+| Chunk | `src/ingestion/chunker.py` | hand-rolled sliding window | 500-word windows, 100-word overlap, deterministic chunk ids |
+| PII | `src/security/pii.py` | Microsoft Presidio + spaCy `en_core_web_sm` | Mask 8 entity types *before* embed / store |
+| Embed | `src/retrieval/embedder.py` | `sentence-transformers` + `BAAI/bge-small-en-v1.5` | 384-dim, local, query/document prompt asymmetry |
+| Vector store | `src/retrieval/vectorstore.py` | ChromaDB (embedded, cosine HNSW) | Zero-ops, on-disk, good to ~1M chunks |
+| Lexical | `src/retrieval/bm25.py` | `rank-bm25` (`BM25Okapi`) | Exact-token recall; in-memory, rebuilt from the store |
+| Fuse + rerank | `src/retrieval/retriever.py` | RRF (k=60) + `cross-encoder/ms-marco-MiniLM-L-6-v2` | Merge by rank position, then a precision pass |
+| Prompt | `prompts/rag_v1.yaml` + `src/generation/prompt.py` | YAML | Versioned and revertible independent of code |
+| LLM | `src/generation/llm.py` | Ollama + Llama 3.2 | Local, $0 / call, 4096-token context |
+| Orchestrate | `src/generation/generator.py` | — | retrieve → ground → generate → validate citations → refuse-safe |
+| API | `src/api/main.py` | FastAPI + slowapi | Async, typed, OpenAPI, per-IP rate limit |
+| Auth | `src/api/auth.py` | `secrets.compare_digest` | Constant-time API-key check |
+| Cache | `src/api/cache.py` | Redis + cosine over query embeddings | Skip generation for near-duplicate questions; silent no-op if Redis is down |
+| Async ingest | `src/ingestion/tasks.py` | Celery + Redis | `task_acks_late` → no lost work if a worker crashes |
+| Metrics | `src/observability/metrics.py` | prometheus-client | Counters + latency histograms on `/metrics` |
+| Logs | `src/observability/logging.py` | stdlib + JSON formatter | One JSON line per event, request-id correlated |
+| Tracing | `src/observability/tracing.py` | Arize Phoenix / OTel (optional) | No-op unless installed and an endpoint is set |
+| Evals | `tests/evals/run_evals.py` | local Llama judge | Faithfulness + context-precision gate, no heavy deps |
+| CI | `.github/workflows/` | GitHub Actions | Lint + unit + image build/boot on every PR; eval gate on retrieval / generation / prompt changes |
+| Deploy | `Dockerfile`, `docker/docker-compose.yml` | Docker | Multi-stage, non-root, model weights baked in, healthcheck |
+
+### Runtime topology (`docker-compose`)
+
+```
+                 ┌────────────┐        scrape /metrics        ┌────────────┐
+   client ──────▶│  api :8000 │◀──────────────────────────────│ prometheus │◀── grafana :3000
+                 │  (FastAPI) │                                │   :9090    │
+                 └─────┬──────┘                                └────────────┘
+                       │ enqueue ingest            reads / writes
+                       ▼                                   │
+                 ┌────────────┐   broker + result   ┌──────┴─────┐   ┌──────────────────┐
+                 │ redis :6379│◀───────────────────▶│  worker    │──▶│ chroma-data vol  │
+                 │ cache+queue│                     │  (Celery)  │   │ (shared, sqlite) │
+                 └────────────┘                     └─────┬──────┘   └──────────────────┘
+                                                         │ chat / embeddings
+                                                         ▼
+                                            ┌───────────────────────────┐
+                                            │ Ollama on host :11434      │
+                                            │ (host.docker.internal)     │
+                                            └───────────────────────────┘
+```
+
+Ollama stays on the host so ~2 GB of model weights aren't copied into containers.
+Opt-in Arize Phoenix tracing (`:6006`) is added by the
+`docker/docker-compose.observability.yml` overlay.
+
+### Deliberate trade-offs (constraints: $0, local, single-node)
+
+| Area | Limitation | Escape hatch |
+|---|---|---|
+| Vector store | `api` + `worker` share one on-disk Chroma (SQLite); concurrent writers can lock | Chroma server mode + `HttpClient` — contained to `vectorstore.py` |
+| Evals | Local Llama judge is noisier than a frontier judge | Pin a compatible RAGAS stack in a separate venv |
+| Deploy | `docker-compose` only, no Kubernetes / autoscaling | k8s Deployment + HPA on query latency / queue depth |
+| Auth | Single shared API key | Per-tenant keys + scopes, or OIDC / JWT at a gateway |
+| PDF | No OCR — scanned PDFs yield empty text | `unstructured` / `pytesseract` fallback |
+| Frontend | No web UI | Swagger `/docs` today; any SPA can consume the OpenAPI schema |
+
 ## Implementation
 
-**Retrieval is a three-stage funnel, not a single search.** Vector search alone misses exact keyword or acronym matches (e.g. a product code or a specific error string); BM25 alone misses semantic paraphrases (asking "how do I get my money back" when the document says "refund policy"). Running both in parallel casts a wide net that hedges against either retriever's blind spot. The two ranked lists — differently scored and not directly comparable (cosine distance vs. BM25 score) — are merged with **Reciprocal Rank Fusion**, `score = Σ 1/(k + rank)`, which combines rankings by position rather than by raw score, sidestepping the normalization problem entirely. RRF is a cheap heuristic, though, so a **CrossEncoder** — a model that reads the query and each candidate chunk jointly, rather than comparing precomputed embeddings — makes the final precision pass, scoring only the narrowed-down top 20 and returning the top 5. This funnel shape (cheap-and-wide → merge → expensive-and-narrow) is what makes strong retrieval affordable.
+**Retrieval is a three-stage funnel, not a single search.** Vector search alone misses exact keyword or acronym matches (e.g. a product code or a specific error string); BM25 alone misses semantic paraphrases (asking "how do I get my money back" when the document says "refund policy"). Running both on every query casts a wide net that hedges against either retriever's blind spot. The two ranked lists — differently scored and not directly comparable (cosine distance vs. BM25 score) — are merged with **Reciprocal Rank Fusion**, `score = Σ 1/(k + rank)`, which combines rankings by position rather than by raw score, sidestepping the normalization problem entirely. RRF is a cheap heuristic, though, so a **CrossEncoder** — a model that reads the query and each candidate chunk jointly, rather than comparing precomputed embeddings — makes the final precision pass, scoring only the narrowed-down top 20 and returning the top 5. This funnel shape (cheap-and-wide → merge → expensive-and-narrow) is what makes strong retrieval affordable.
 
 **Chunking** uses 500-word windows with 100-word overlap — sized empirically against Llama 3.2's context window so that several chunks plus the question plus the system prompt fit comfortably, while the overlap prevents a fact from being severed exactly at a chunk boundary.
 
@@ -52,16 +116,16 @@ A semantic cache sits in front of the LLM call: if a sufficiently similar questi
 
 **Every model load is cached (`@lru_cache(maxsize=1)`).** The embedding model, reranker, and PII analyzer are all large objects with real load latency; the cache ensures each is loaded once per process and reused across every request, rather than reloaded per call.
 
-**An automated quality gate protects answer quality.** RAGAS evaluates faithfulness (does the answer actually follow from the retrieved context, or is the model making things up?) and context precision (are the retrieved chunks actually relevant?) against a fixed Q&A dataset, using a local Ollama model as the judge. Faithfulness below 0.70 means the system is fabricating unsupported claims roughly 30% of the time — the threshold exists to fail a pull request automatically rather than let that regression reach users.
+**An automated quality gate protects answer quality.** A local-judge eval harness (a local Ollama model grades the pipeline's own output — no RAGAS or other heavy dependency) scores faithfulness (does the answer actually follow from the retrieved context, or is the model making things up?) and context precision (are the retrieved chunks actually relevant, and ranked first?) against a fixed Q&A dataset. Faithfulness below 0.70 means the system is fabricating unsupported claims roughly 30% of the time — the threshold exists to fail a pull request automatically rather than let that regression reach users. The `dataset.json` keeps RAGAS-compatible field names so RAGAS can be dropped back in behind a pinned dependency set.
 
-**Observability and security wrap the whole pipeline rather than being bolted onto one part of it:** Prometheus/Grafana track latency and volume metrics, Arize Phoenix traces individual LLM calls, X-API-Key auth and per-client rate limiting guard the API surface, and the Redis semantic cache reduces both cost and latency for repeated or near-duplicate questions.
+**Observability and security wrap the whole pipeline rather than being bolted onto one part of it:** Prometheus/Grafana track latency and volume metrics, structured JSON logs are request-ID correlated, optional Arize Phoenix tracing spans individual LLM calls, X-API-Key auth and per-IP rate limiting guard the API surface, and the Redis semantic cache reduces both cost and latency for repeated or near-duplicate questions.
 
 ## Advantages
 
 - **Zero marginal cost.** Every model in the pipeline — LLM, embeddings, reranker, PII detection — runs locally. Answering one question or ten thousand costs the same $0 in API fees.
 - **Data never leaves the machine, and PII never reaches storage.** No document content or query is sent to a third-party API, and Presidio strips sensitive entities before indexing, not after.
 - **Retrieval quality from combining two different strengths.** Hybrid (semantic + keyword) search with RRF fusion and CrossEncoder reranking outperforms either retrieval method alone, especially on real-world queries that mix exact terms with paraphrased intent.
-- **Regressions are caught automatically, not by eyeballing outputs.** The RAGAS-based CI gate fails a pull request if answer faithfulness or retrieval precision drops below threshold — quality is measured, not assumed.
+- **Regressions are caught automatically, not by eyeballing outputs.** The CI eval gate fails a pull request if answer faithfulness or retrieval precision drops below threshold — quality is measured, not assumed.
 - **Answers are auditable.** Every response cites its source document and page, and every prompt change is tracked and revertible independently of code.
 - **Resilient by design.** Async ingestion with late acknowledgment means a crashed worker doesn't silently drop a document; the semantic cache and rate limiting protect the system under repeated or bursty load.
 
@@ -71,7 +135,7 @@ Building this project meant working through the full width of what separates a R
 
 - **Hybrid retrieval design** — why semantic and keyword search fail differently, and how rank-fusion (RRF) lets you merge incomparable ranking signals without ad hoc score normalization.
 - **The role of reranking** — the tradeoff between cheap-and-approximate retrieval and expensive-and-accurate scoring, and why you fan out wide before narrowing precisely.
-- **Evaluation-driven LLM development** — treating answer quality as a metric to gate on (RAGAS faithfulness/precision) rather than a subjective impression, and wiring that into CI so regressions are caught before merge, not after deployment.
+- **Evaluation-driven LLM development** — treating answer quality as a metric to gate on (faithfulness / context precision) rather than a subjective impression, and wiring that into CI so regressions are caught before merge, not after deployment.
 - **Privacy-by-construction in a data pipeline** — why *where* in the pipeline a safeguard runs (before vs. after indexing) is itself a correctness property, not just an implementation detail.
 - **Operating a fully local LLM stack** — the practical differences between calling a hosted model API and running inference, embedding, and reranking models locally: latency characteristics, resource management, and the `lru_cache`-once-load pattern for expensive model objects.
 - **Production concerns beyond the model call itself** — async task processing with failure recovery (Celery `task_acks_late`), observability (metrics and tracing, not just logs), API security (auth, rate limiting), and versioning prompts as first-class, revertible artifacts alongside code.
@@ -110,13 +174,12 @@ Endpoints: `GET /health` · `POST /ingest` (`?background=true` for async) ·
 `GET /tasks/{id}` · `POST /query` · `GET /metrics` · `GET /docs`.
 
 **Prove it works:** `make validate` runs lint + unit + integration + eval gate +
-a live API call and writes [`VALIDATION.md`](VALIDATION.md).
+a live API call and writes a `VALIDATION.md` report.
 Individually: `make test` · `make test-int` (needs Ollama) · `make evals` ·
 `make docker-build`.
 
-Docs: [ARCHITECTURE.md](ARCHITECTURE.md) (topology, gaps, tool alternatives) ·
-[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) (every stage explained, with commands
-and proof steps).
+See [**Architecture**](#architecture) above for the component map, runtime topology,
+and the deliberate single-node trade-offs.
 
 ## Project Structure
 
@@ -168,7 +231,6 @@ production-rag/
 ├── prompts/rag_v1.yaml            # Versioned prompt template
 ├── Dockerfile                     # Multi-stage, non-root, models baked in
 ├── Makefile
-├── ARCHITECTURE.md
 ├── .env / .env.example
 └── requirements.txt
 ```

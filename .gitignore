@@ -14,8 +14,18 @@ data/chroma_db/
 
 # Claude Code local settings
 .claude/settings.local.json
+CLAUDE.md
+claude.md
 
 # Tooling
 .qodo/
 .ruff_cache/
 scripts/_*.log
+
+# Local-only docs — kept on disk, not published to GitHub.
+# README.md carries the architecture; these are the long-form / personal versions.
+/ARCHITECTURE.md
+/VALIDATION.md
+/LINKEDIN_POST.md
+/docs/WALKTHROUGH.md
+/docs/*.pdf

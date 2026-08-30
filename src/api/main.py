@@ -136,7 +136,11 @@ def health() -> HealthResponse:
 def query(request: Request, body: QueryRequest) -> QueryResponse:
     started = time.perf_counter()
 
-    cached = lookup(body.question)
+    try:
+        cached = lookup(body.question)
+    except Exception:
+        logger.warning("cache lookup failed; treating as a miss", exc_info=True)
+        cached = None
     if cached is not None:
         metrics.CACHE_LOOKUPS.labels(result="hit").inc()
         metrics.QUERIES.labels(outcome="cached").inc()

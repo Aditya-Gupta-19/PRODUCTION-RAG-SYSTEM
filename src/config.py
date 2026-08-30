@@ -1,8 +1,21 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Once the embedding + reranker weights are cached (after first setup, in CI's
+# restored cache, and in the Docker image), force offline model loads. Otherwise
+# sentence-transformers / huggingface_hub re-validate every cached file against
+# huggingface.co on each load; those anonymous requests get rate-limited and
+# intermittently raise mid-request, which surfaces as a 500 on /query.
+# A fresh machine with an empty cache stays online so the first download works;
+# set HF_HUB_OFFLINE=0 explicitly to override either way.
+_hf_hub_cache = Path(os.getenv("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+if _hf_hub_cache.is_dir() and any(_hf_hub_cache.glob("models--*")):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 
 class Settings(BaseSettings):

@@ -1,3 +1,4 @@
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -7,6 +8,8 @@ from src.generation.prompt import load_prompt
 from src.observability import metrics
 from src.observability.tracing import span
 from src.retrieval.retriever import RetrievedChunk, retrieve
+
+logger = logging.getLogger("rag.generator")
 
 REFUSAL = "I don't have enough information in the provided documents to answer that."
 
@@ -71,14 +74,34 @@ def answer(
 
     Guarantees:
     - No retrieved context  → deterministic refusal, the LLM is never called.
+    - Retrieval error        → retry without the reranker, then ``degraded=True``.
     - LLM error             → ``degraded=True`` fallback, never a raised exception.
     - Citations in the answer are validated against the passages actually shown.
     """
     prompt = load_prompt(prompt_version)
 
     retrieval_started = time.perf_counter()
-    with span("retrieve", question=question):
-        chunks = retrieve(question, rerank_top_n=rerank_top_n)
+    try:
+        with span("retrieve", question=question):
+            chunks = retrieve(question, rerank_top_n=rerank_top_n)
+    except Exception:
+        # A reranker/model-load blip must not 500 the request. Retry with the
+        # cross-encoder off (RRF order is still a good ranking); if even that
+        # fails, degrade rather than raise.
+        logger.exception("retrieval with rerank failed; retrying without rerank")
+        try:
+            with span("retrieve", question=question, rerank=False):
+                chunks = retrieve(question, rerank_top_n=rerank_top_n, rerank=False)
+        except Exception:
+            logger.exception("retrieval failed entirely; returning degraded answer")
+            return RagAnswer(
+                question,
+                "The answer service is temporarily unavailable. Please retry shortly.",
+                [],
+                [],
+                prompt.version,
+                degraded=True,
+            )
     metrics.RETRIEVAL_LATENCY.observe(time.perf_counter() - retrieval_started)
 
     contexts = [
